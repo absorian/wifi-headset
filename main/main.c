@@ -5,13 +5,20 @@
 #include "driver/i2s_std.h"
 #include "driver/gpio.h"
 #include "freertos/portmacro.h"
+
 #include "esp_check.h"
+#include "nvs_flash.h"
 #include "sdkconfig.h"
 
 #include <math.h>
 #include <stdint.h>
 #include <stdlib.h>
 
+static const char *TAG = "appMAIN";
+
+void wifi_init_softap(void);
+void dhcp_set_captiveportal_url(void);
+void start_webserver(void);
 
 #define I2S_BCLK_PIN        GPIO_NUM_1      // I2S bit clock io number
 #define I2S_WS_PIN          GPIO_NUM_2      // I2S word select io number
@@ -20,7 +27,6 @@
 
 static i2s_chan_handle_t                tx_chan;        // I2S tx channel handler
 static i2s_chan_handle_t                rx_chan;        // I2S rx channel handler
-
 
 static void i2s_example_init_std_duplex(void)
 {
@@ -68,8 +74,67 @@ static void i2s_example_init_std_duplex(void)
     ESP_ERROR_CHECK(i2s_channel_init_std_mode(rx_chan, &std_cfg));
 }
 
+static void nvs_storage_print_host_creds()
+{
+    esp_err_t err;
+    nvs_handle_t handle;
+    size_t required_size = 0;
+
+    err = nvs_open("storage", NVS_READWRITE, &handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Error (%s) opening NVS handle!", esp_err_to_name(err));
+        return;
+    }
+
+    ESP_LOGI(TAG, "Reading host creds...");
+    err = nvs_get_str(handle, "host_ssid", NULL, &required_size);
+    if (err == ESP_OK) {
+        char* message = malloc(required_size);
+        err = nvs_get_str(handle, "host_ssid", message, &required_size);
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "host_ssid: %s", message);
+        }
+        free(message);
+    }
+
+    err = nvs_get_str(handle, "host_pass", NULL, &required_size);
+    if (err == ESP_OK) {
+        char* message = malloc(required_size);
+        err = nvs_get_str(handle, "host_pass", message, &required_size);
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "host_pass: %s", message);
+        }
+        free(message);
+    }
+
+    nvs_close(handle);
+}
+
+
 void app_main(void)
 {
+    esp_err_t err = nvs_flash_init();
+    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        // NVS partition was truncated and needs to be erased
+        // Retry nvs_flash_init
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        err = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(err);
+
+    nvs_storage_print_host_creds();
+
+    wifi_init_softap();
+
+    // Configure DNS-based captive portal, if configured
+    #ifdef CONFIG_ESP_ENABLE_DHCP_CAPTIVEPORTAL
+        dhcp_set_captiveportal_url();
+    #endif
+
+    // Start the server for the first time
+    start_webserver();
+    return;
+
     i2s_example_init_std_duplex();
 
     size_t bytes_read;

@@ -1,0 +1,21 @@
+<html>
+    <head>
+        <style>
+            form, input {
+                width: 200px;
+            }
+            form > * {
+                margin-bottom: 5px;
+            }
+        </style>
+    </head>
+    <body>
+        <h2>WiFi Login</h2>
+        <form action='/login' method='post'>
+            SSID <input type='text' name='ssid'>
+            Password <input type='password' name='pass'>
+            <input type='submit' value='Submit'>
+            <b> %s </b>
+        </form>
+    </body>
+</html>
