@@ -1,21 +1,34 @@
 <html>
     <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <style>
-            form, input {
-                width: 200px;
+            body {
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                min-height: 100vh;
+                margin: 0;
             }
-            form > * {
+            b {
+                display: block;
+                margin-top: 30px;
+                text-align: center;
+                color: darkgoldenrod;
+            }
+            div, form > * {
                 margin-bottom: 5px;
+                width: 300px;
             }
         </style>
     </head>
-    <body>
-        <h2>WiFi Login</h2>
+    <body><div>
+        <h2>Headset WiFi Login</h2>
         <form action='/login' method='post'>
             SSID <input type='text' name='ssid'>
             Password <input type='password' name='pass'>
             <input type='submit' value='Submit'>
+            <input type='submit' value='Exit config mode' formaction="/restart">
             <b> %s </b>
         </form>
-    </body>
+    </div></body>
 </html>
