@@ -62,6 +62,8 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
 		ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
 		ESP_LOGI(TAG, "got ip:" IPSTR, IP2STR(&event->ip_info.ip));
 		s_sta_retry_num = 0;
+		esp_event_post_to(g_main_event_loop, APP_MAIN,
+				  APP_WIFI_CONNECTED, NULL, 0, portMAX_DELAY);
 		xEventGroupSetBits(s_wifi_event_group, WIFI_STA_CONNECTED_BIT);
 	}
 }

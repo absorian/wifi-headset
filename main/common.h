@@ -21,8 +21,21 @@ void wifi_setup_sta(void);
 void captive_server_start(void);
 void captive_server_stop(void);
 
+typedef struct {
+	char ip[16];
+	uint16_t udp_port;
+	uint16_t tcp_port;
+} host_conn_info_t;
+
+void discovery_start(void);
+void discovery_stop(void);
+
+void control_transport_start(const host_conn_info_t *info);
+void control_transport_stop();
+
 ESP_EVENT_DECLARE_BASE(APP_MAIN);
 extern esp_event_loop_handle_t g_main_event_loop;
 
-#define APP_TO_CONF_MODE 0
-#define APP_TO_MAIN_MODE 1
+enum { APP_TO_CONF_MODE, APP_TO_MAIN_MODE, 
+	APP_WIFI_CONNECTED, 
+	APP_HOST_FOUND, APP_HOST_CONNECTED, APP_HOST_DISCONNECTED };

@@ -50,6 +50,22 @@ static void main_event_handler(void *handler_arg, esp_event_base_t base,
 		wifi_setup_softap();
 		captive_server_start();
 		break;
+	case APP_WIFI_CONNECTED:
+		discovery_start();
+		break;
+	case APP_HOST_FOUND:
+		discovery_stop();
+		host_conn_info_t *info = event_data;
+		control_transport_start(info);
+		break;
+	case APP_HOST_CONNECTED:
+    	ESP_LOGI(TAG, "Host connected");
+		break;
+	case APP_HOST_DISCONNECTED:
+    	ESP_LOGI(TAG, "Host diconnected");
+		control_transport_stop();
+		discovery_start();
+		break;
 
 	default:
 		break;
