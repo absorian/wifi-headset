@@ -29,3 +29,10 @@ int control_transport_open_conn(cl_conn_info_t *conn_info);
 void control_transport_close_conn();
 int control_transport_accept(const cl_conn_info_t *conn_info);
 int control_transport_alive();
+
+int audio_transport_init();
+void audio_transport_deinit();
+int audio_transport_open_conn(cl_conn_info_t *conn_info);
+void audio_transport_close_conn();
+void audio_transport_start();
+void audio_transport_stop();

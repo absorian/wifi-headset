@@ -4,4 +4,12 @@ project(wifi-headset-server)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-add_executable(${PROJECT_NAME} main.c discovery.c control_transport.c)
+add_subdirectory(miniaudio)
+
+add_executable(${PROJECT_NAME} main.c
+    discovery.c
+    common.h
+    audio_transport.c
+    control_transport.c)
+
+target_link_libraries(${PROJECT_NAME} PRIVATE miniaudio)

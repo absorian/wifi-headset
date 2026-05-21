@@ -33,6 +33,13 @@ void discovery_stop(void);
 void control_transport_start(const host_conn_info_t *info);
 void control_transport_stop();
 
+void audio_transport_setup(const host_conn_info_t *info);
+void audio_transport_start(void);
+void audio_transport_stop(void);
+
+void i2s_periph_init(void);
+void i2s_periph_deinit(void);
+
 ESP_EVENT_DECLARE_BASE(APP_MAIN);
 extern esp_event_loop_handle_t g_main_event_loop;
 

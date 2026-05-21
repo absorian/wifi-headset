@@ -38,7 +38,7 @@ static void main_event_handler(void *handler_arg, esp_event_base_t base,
 
 		captive_server_stop();
 		wifi_setup_sta();
-		// enable i2s periphs
+		i2s_periph_init();
 		break;
 	case APP_TO_CONF_MODE:
 		if (s_is_conf_mode)
@@ -47,6 +47,7 @@ static void main_event_handler(void *handler_arg, esp_event_base_t base,
 		vTaskDelay(pdMS_TO_TICKS(500));
 		s_is_conf_mode = true;
 
+		i2s_periph_deinit();
 		wifi_setup_softap();
 		captive_server_start();
 		break;
@@ -57,12 +58,15 @@ static void main_event_handler(void *handler_arg, esp_event_base_t base,
 		discovery_stop();
 		host_conn_info_t *info = event_data;
 		control_transport_start(info);
+		audio_transport_setup(info);
 		break;
 	case APP_HOST_CONNECTED:
     	ESP_LOGI(TAG, "Host connected");
+		audio_transport_start();
 		break;
 	case APP_HOST_DISCONNECTED:
     	ESP_LOGI(TAG, "Host diconnected");
+		audio_transport_stop();
 		control_transport_stop();
 		discovery_start();
 		break;
@@ -101,6 +105,7 @@ void app_main(void)
 	s_is_conf_mode = true;
 	wifi_setup_softap();
 	captive_server_start();
+	// wifi_setup_sta();
 
 	while (1) {
 		esp_event_loop_run(g_main_event_loop, pdMS_TO_TICKS(10));
