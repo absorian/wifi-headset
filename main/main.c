@@ -62,6 +62,7 @@ static void main_event_handler(void *handler_arg, esp_event_base_t base,
 		break;
 	case APP_HOST_CONNECTED:
     	ESP_LOGI(TAG, "Host connected");
+		discovery_stop();
 		audio_transport_start();
 		break;
 	case APP_HOST_DISCONNECTED:

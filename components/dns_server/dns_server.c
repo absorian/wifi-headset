@@ -212,20 +212,29 @@ void dns_server_task(void *pvParameters)
         }
         ESP_LOGI(TAG, "Socket created");
 
-        int err = bind(sock, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+        struct timeval timeout;
+        timeout.tv_sec = 0;
+        timeout.tv_usec = 1000 * 100;
+        int err = setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout,
+                sizeof timeout);
+        if (err < 0) {
+            ESP_LOGE(TAG, "Socket unable to set timeout: errno %d", errno);
+        }
+
+        err = bind(sock, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
         if (err < 0) {
             ESP_LOGE(TAG, "Socket unable to bind: errno %d", errno);
         }
         ESP_LOGI(TAG, "Socket bound, port %d", DNS_PORT);
 
+        struct sockaddr_in6 source_addr; // Large enough for both IPv4 or IPv6
+        socklen_t socklen = sizeof(source_addr);
         while (handle->started) {
-            ESP_LOGI(TAG, "Waiting for data");
-            struct sockaddr_in6 source_addr; // Large enough for both IPv4 or IPv6
-            socklen_t socklen = sizeof(source_addr);
             int len = recvfrom(sock, rx_buffer, sizeof(rx_buffer) - 1, 0, (struct sockaddr *)&source_addr, &socklen);
 
             // Error occurred during receiving
             if (len < 0) {
+                if (errno == EAGAIN) continue;
                 ESP_LOGE(TAG, "recvfrom failed: errno %d", errno);
                 close(sock);
                 break;
@@ -259,11 +268,12 @@ void dns_server_task(void *pvParameters)
         }
 
         if (sock != -1) {
-            ESP_LOGE(TAG, "Shutting down socket");
+            ESP_LOGI(TAG, "Shutting down socket");
             shutdown(sock, 0);
             close(sock);
         }
     }
+    free(handle);
     vTaskDelete(NULL);
 }
 
@@ -284,7 +294,7 @@ void stop_dns_server(dns_server_handle_t handle)
 {
     if (handle) {
         handle->started = false;
-        vTaskDelete(handle->task);
-        free(handle);
+        // vTaskDelete(handle->task);
+        // free(handle);
     }
 }
