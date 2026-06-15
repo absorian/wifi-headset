@@ -213,7 +213,7 @@ static esp_err_t restart_post_handler(httpd_req_t *req)
 
 	ESP_LOGI(TAG, "Restart requested");
 
-	err = esp_event_post_to(g_main_event_loop, APP_MAIN, APP_TO_MAIN_MODE,
+	err = esp_event_post_to(g_main_event_loop, APP_MAIN, APP_CONF_SWITCH,
 				NULL, 0, portMAX_DELAY);
 	if (err != ESP_OK) {
 		strcpy(ctx->status_msg, "Internal Error, please try again");

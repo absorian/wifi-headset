@@ -20,7 +20,28 @@ static const char *TAG = "appMAIN";
 ESP_EVENT_DEFINE_BASE(APP_MAIN);
 esp_event_loop_handle_t g_main_event_loop;
 
-static bool s_is_conf_mode = false;
+enum app_mode {
+	APP_MODE_SLEEP = 0,
+	APP_MODE_CONF,
+	APP_MODE_MAIN
+} s_app_mode;
+
+static enum app_mode app_power_switch()
+{
+	if (s_app_mode == APP_MODE_SLEEP)
+		return APP_MODE_MAIN;
+	return APP_MODE_SLEEP;
+}
+
+static enum app_mode app_conf_switch()
+{
+	if (s_app_mode == APP_MODE_SLEEP)
+		return s_app_mode;
+
+	if (s_app_mode == APP_MODE_MAIN)
+		return APP_MODE_CONF;
+	return APP_MODE_MAIN;
+}
 
 static void main_event_handler(void *handler_arg, esp_event_base_t base,
 			       int32_t id, void *event_data)
@@ -29,34 +50,58 @@ static void main_event_handler(void *handler_arg, esp_event_base_t base,
 		return;
 
 	switch (id) {
-	case APP_TO_MAIN_MODE:
-		if (!s_is_conf_mode)
+	case APP_CONF_SWITCH:
+	case APP_POWER_SWITCH:
+		enum app_mode to = id == APP_CONF_SWITCH ?
+						   app_conf_switch() : app_power_switch();
+		if (s_app_mode == to)
 			break;
-		// Let caller finalize its business
+    	ESP_LOGI(TAG, "Mode switch %d -> %d", s_app_mode, to);
 		vTaskDelay(pdMS_TO_TICKS(500));
-		s_is_conf_mode = false;
-
-		captive_server_stop();
-		wifi_setup_sta();
-		i2s_periph_init();
-		break;
-	case APP_TO_CONF_MODE:
-		if (s_is_conf_mode)
-			break;
-		// Let caller finalize its business
-		vTaskDelay(pdMS_TO_TICKS(500));
-		s_is_conf_mode = true;
-
-		i2s_periph_deinit();
-		wifi_setup_softap();
-		captive_server_start();
+		// deinit
+		switch (s_app_mode) {
+			case APP_MODE_CONF:
+				captive_server_stop();
+				break;
+			case APP_MODE_MAIN:
+				audio_transport_stop();
+				control_transport_stop();
+				i2s_periph_deinit();
+				discovery_stop();
+				break;
+			case APP_MODE_SLEEP:
+				esp_event_loop_create_default();
+				wifi_handle_init();
+				break;
+		}
+		// init
+		s_app_mode = to;
+		switch (s_app_mode) {
+			case APP_MODE_CONF:
+				wifi_handle_setup_softap();
+				captive_server_start();
+				break;
+			case APP_MODE_MAIN:
+				wifi_handle_setup_sta();
+				i2s_periph_init();
+				break;
+			case APP_MODE_SLEEP:
+				wifi_handle_deinit();
+				esp_event_loop_delete_default();
+				// go to sleep
+				// setup wakeup
+				break;
+		}
 		break;
 	case APP_WIFI_CONNECTED:
+    	ESP_LOGI(TAG, "WIFI connected");
 		discovery_start();
 		break;
 	case APP_HOST_FOUND:
 		discovery_stop();
 		host_conn_info_t *info = event_data;
+    	ESP_LOGI(TAG, "Host found ip=%s udp=%hu tcp=%hu",
+				 info->ip, info->udp_port, info->tcp_port);
 		control_transport_start(info);
 		audio_transport_setup(info);
 		break;
@@ -93,7 +138,6 @@ void app_main(void)
 	}
 	ESP_ERROR_CHECK(err);
 
-	ESP_ERROR_CHECK(esp_event_loop_create_default());
 	ESP_ERROR_CHECK(
 		esp_event_loop_create(&event_loop_args, &g_main_event_loop));
 	ESP_ERROR_CHECK(esp_event_handler_register_with(
@@ -101,12 +145,9 @@ void app_main(void)
 		main_event_handler, NULL));
 
 	ESP_ERROR_CHECK(esp_netif_init());
-	wifi_basic_init();
 
-	s_is_conf_mode = true;
-	wifi_setup_softap();
-	captive_server_start();
-	// wifi_setup_sta();
+	esp_event_post_to(g_main_event_loop, APP_MAIN, APP_POWER_SWITCH,
+					  NULL, 0, portMAX_DELAY);
 
 	while (1) {
 		esp_event_loop_run(g_main_event_loop, pdMS_TO_TICKS(10));

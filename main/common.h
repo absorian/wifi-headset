@@ -14,9 +14,10 @@
 esp_err_t nvs_storage_set_host_creds(const char *ssid, const char *pass);
 esp_err_t nvs_storage_get_host_creds(char *ssid, char *pass);
 
-void wifi_basic_init(void);
-void wifi_setup_softap(void);
-void wifi_setup_sta(void);
+void wifi_handle_init(void);
+void wifi_handle_deinit(void);
+void wifi_handle_setup_softap(void);
+void wifi_handle_setup_sta(void);
 
 void captive_server_start(void);
 void captive_server_stop(void);
@@ -43,6 +44,6 @@ void i2s_periph_deinit(void);
 ESP_EVENT_DECLARE_BASE(APP_MAIN);
 extern esp_event_loop_handle_t g_main_event_loop;
 
-enum { APP_TO_CONF_MODE, APP_TO_MAIN_MODE, 
+enum { APP_POWER_SWITCH, APP_CONF_SWITCH,
 	APP_WIFI_CONNECTED, 
 	APP_HOST_FOUND, APP_HOST_CONNECTED, APP_HOST_DISCONNECTED };

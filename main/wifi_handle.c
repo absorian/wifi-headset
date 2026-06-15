@@ -19,7 +19,6 @@
 
 static const char *TAG = "appWIFI";
 
-static EventGroupHandle_t s_wifi_event_group;
 static int s_sta_retry_num = 0;
 
 static esp_netif_t *s_netif_ap = NULL;
@@ -53,9 +52,6 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
 			esp_wifi_connect();
 			s_sta_retry_num++;
 			ESP_LOGI(TAG, "retry to connect to the AP");
-		} else {
-			xEventGroupSetBits(s_wifi_event_group,
-					   WIFI_STA_FAIL_BIT);
 		}
 		ESP_LOGI(TAG, "connect to the AP fail");
 	} else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
@@ -64,11 +60,10 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
 		s_sta_retry_num = 0;
 		esp_event_post_to(g_main_event_loop, APP_MAIN,
 				  APP_WIFI_CONNECTED, NULL, 0, portMAX_DELAY);
-		xEventGroupSetBits(s_wifi_event_group, WIFI_STA_CONNECTED_BIT);
 	}
 }
 
-void wifi_basic_init(void)
+void wifi_handle_init(void)
 {
 	wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
 
@@ -77,8 +72,6 @@ void wifi_basic_init(void)
 
 	ESP_ERROR_CHECK(esp_wifi_init(&cfg));
 
-	s_wifi_event_group = xEventGroupCreate();
-
 	ESP_ERROR_CHECK(esp_event_handler_instance_register(
 		WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL, NULL));
 	ESP_ERROR_CHECK(esp_event_handler_instance_register(
@@ -86,7 +79,15 @@ void wifi_basic_init(void)
 		NULL));
 }
 
-void wifi_setup_softap(void)
+void wifi_handle_deinit(void)
+{
+	esp_wifi_stop();
+	esp_netif_destroy_default_wifi(s_netif_ap);
+	esp_netif_destroy_default_wifi(s_netif_sta);
+	ESP_ERROR_CHECK(esp_wifi_deinit());
+}
+
+void wifi_handle_setup_softap(void)
 {
 	esp_netif_set_default_netif(s_netif_ap);
 
@@ -132,7 +133,7 @@ void wifi_setup_softap(void)
 		 CONFIG_ESP_WIFI_SSID, CONFIG_ESP_WIFI_PASSWORD);
 }
 
-void wifi_setup_sta(void)
+void wifi_handle_setup_sta(void)
 {
 	char ssid[HOST_SSID_MAX], pass[HOST_PASS_MAX];
 	esp_err_t err;
