@@ -76,14 +76,17 @@ static void main_event_handler(void *handler_arg, esp_event_base_t base,
 		s_app_mode = to;
 		switch (s_app_mode) {
 		case APP_MODE_CONF:
+			periph_status_led_mode_set(STATUS_LED_FLASH);
 			wifi_handle_setup_softap();
 			captive_server_start();
 			break;
 		case APP_MODE_MAIN:
+			periph_status_led_mode_set(STATUS_LED_BLINK);
 			wifi_handle_setup_sta();
 			i2s_periph_init();
 			break;
 		case APP_MODE_SLEEP:
+			periph_status_led_mode_set(STATUS_LED_OFF);
 			wifi_handle_deinit();
 			esp_event_loop_delete_default();
 			esp_netif_deinit();
@@ -106,6 +109,7 @@ static void main_event_handler(void *handler_arg, esp_event_base_t base,
 		break;
 	case APP_HOST_CONNECTED:
 		ESP_LOGI(TAG, "Host connected");
+		periph_status_led_mode_set(STATUS_LED_OFF);
 		discovery_stop();
 		audio_transport_start();
 		break;
@@ -114,6 +118,7 @@ static void main_event_handler(void *handler_arg, esp_event_base_t base,
 		audio_transport_stop();
 		control_transport_stop();
 		discovery_start();
+		periph_status_led_mode_set(STATUS_LED_BLINK);
 		break;
 
 	default:

@@ -41,8 +41,16 @@ void audio_transport_stop(void);
 void i2s_periph_init(void);
 void i2s_periph_deinit(void);
 
+enum periph_status_led_mode {
+	STATUS_LED_EN,
+	STATUS_LED_OFF,
+	STATUS_LED_BLINK,
+	STATUS_LED_FLASH,
+};
+
 void periph_init();
 void periph_deinit();
+void periph_status_led_mode_set(enum periph_status_led_mode mode);
 
 ESP_EVENT_DECLARE_BASE(APP_MAIN);
 extern esp_event_loop_handle_t g_main_event_loop;

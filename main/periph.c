@@ -10,14 +10,19 @@
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include <stdatomic.h>
 
-static const char *TAG = "appPERF";
+static const char *TAG = "appPRPH";
 
 #define PERIPH_BTN_PRESSED_LEVEL 1
 #define PERIPH_BTN_DEBOUNCE_MS 150
 #define PERIPH_BTN_LONG_CLICK_MS 1000
 
 #define PERIPH_MAIN_BTN_GPIO GPIO_NUM_4
+#define PERIPH_STATUS_LED_GPIO GPIO_NUM_9
+
+#define PERIPH_STATUS_LED_FLASH_INTV_MS 1000
+#define PERIPH_STATUS_LED_BLINK_INTV_MS 500
 
 #define PERIPH_WAKEUP_BIT (1 << 0)
 
@@ -40,7 +45,9 @@ struct periph_btn_ctx {
 };
 
 static TaskHandle_t s_task;
+
 static periph_btn_ctx_t s_main_btn;
+static atomic_int s_led_mode;
 static EventGroupHandle_t s_wakeup_evt;
 
 static void periph_btn_tick(periph_btn_ctx_t *ctx, uint32_t tick_tm)
@@ -83,11 +90,43 @@ static void periph_btn_tick(periph_btn_ctx_t *ctx, uint32_t tick_tm)
 	ctx->debounce_tm += tick_tm;
 }
 
+static void periph_status_led_tick(uint32_t tick_tm)
+{
+	static int64_t tm;
+	static int level;
+
+	switch (s_led_mode) {
+	case STATUS_LED_BLINK:
+		if (tm <= PERIPH_STATUS_LED_BLINK_INTV_MS)
+			break;
+		tm = 0;
+		gpio_set_level(PERIPH_STATUS_LED_GPIO, level);
+		level = !level;
+		break;
+	case STATUS_LED_FLASH:
+		if (level == 0 && tm > PERIPH_STATUS_LED_FLASH_INTV_MS) {
+			tm = 0;
+			gpio_set_level(PERIPH_STATUS_LED_GPIO, 1);
+			level++;
+		} else if (level == 1 && tm > 20) {
+			tm = 0;
+			gpio_set_level(PERIPH_STATUS_LED_GPIO, 0);
+			level = 0;
+		}
+		break;
+	default:
+		break;
+	}
+	tm += tick_tm;
+}
+
 static void periph_task(void *arg)
 {
+	const uint32_t tick_tm = 10;
 	while (1) {
-		periph_btn_tick(&s_main_btn, 10);
-		vTaskDelay(pdMS_TO_TICKS(10));
+		periph_btn_tick(&s_main_btn, tick_tm);
+		periph_status_led_tick(tick_tm);
+		vTaskDelay(pdMS_TO_TICKS(tick_tm));
 	}
 }
 
@@ -132,16 +171,25 @@ void periph_init()
 	io_conf.pull_down_en = GPIO_PULLDOWN_ENABLE;
 	gpio_config(&io_conf);
 
+	esp_deep_sleep_enable_gpio_wakeup(io_conf.pin_bit_mask,
+					  ESP_GPIO_WAKEUP_GPIO_HIGH);
+
 	s_main_btn = (periph_btn_ctx_t){};
 	s_main_btn.last_level = !PERIPH_BTN_PRESSED_LEVEL;
 	s_main_btn.io = PERIPH_MAIN_BTN_GPIO;
 	s_main_btn.cb = periph_main_btn_handler;
 
-	esp_deep_sleep_enable_gpio_wakeup(io_conf.pin_bit_mask,
-					  ESP_GPIO_WAKEUP_GPIO_HIGH);
+	// Configure LED
+	io_conf = (gpio_config_t){};
+	io_conf.mode = GPIO_MODE_OUTPUT;
+	io_conf.pin_bit_mask = (1ULL << PERIPH_STATUS_LED_GPIO);
+	gpio_config(&io_conf);
+
+	s_led_mode = STATUS_LED_OFF;
+	esp_rom_gpio_pad_select_gpio(PERIPH_STATUS_LED_GPIO);
+	gpio_deep_sleep_hold_en();
 
 	s_wakeup_evt = xEventGroupCreate();
-
 	xTaskCreate(periph_task, "app_periph", 2048, NULL, 0, &s_task);
 
 	bits = xEventGroupWaitBits(s_wakeup_evt, PERIPH_WAKEUP_BIT, pdTRUE,
@@ -160,7 +208,27 @@ void periph_deinit()
 	if (s_task == NULL)
 		return;
 
+	gpio_deep_sleep_hold_dis();
 	vTaskDelete(s_task);
 	s_task = NULL;
+	periph_status_led_mode_set(STATUS_LED_OFF);
 	vEventGroupDelete(s_wakeup_evt);
+}
+
+void periph_status_led_mode_set(enum periph_status_led_mode mode)
+{
+	s_led_mode = mode;
+	switch (mode) {
+	case STATUS_LED_OFF:
+		gpio_set_level(PERIPH_STATUS_LED_GPIO, 0);
+		gpio_hold_en(PERIPH_STATUS_LED_GPIO);
+		break;
+	case STATUS_LED_EN:
+		gpio_set_level(PERIPH_STATUS_LED_GPIO, 1);
+		gpio_hold_en(PERIPH_STATUS_LED_GPIO);
+		break;
+	default:
+		gpio_hold_dis(PERIPH_STATUS_LED_GPIO);
+		break;
+	}
 }
