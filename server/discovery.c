@@ -67,9 +67,9 @@ int discovery_respond(const cl_conn_info_t *cl)
 		     (struct sockaddr *)&cl->addr, socklen);
 	if (ret < 0) {
 		fprintf(stderr, "sendto failed errno=%d\n", errno);
-        return -1;
+		return -1;
 	}
-    return 0;
+	return 0;
 }
 
 int discovery_open()
@@ -93,7 +93,7 @@ int discovery_open()
 		return -1;
 	}
 
-    return 0;
+	return 0;
 }
 
 void discovery_close()

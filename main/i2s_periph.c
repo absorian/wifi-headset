@@ -25,7 +25,7 @@ static void i2s_periph_init_std_duplex(void)
      * it only requires the I2S controller id and I2S role */
 	i2s_chan_config_t chan_cfg =
 		I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_AUTO, I2S_ROLE_MASTER);
-	
+
 	chan_cfg.auto_clear = true;
 
 	ESP_ERROR_CHECK(i2s_new_channel(&chan_cfg, &g_i2s_tx, &g_i2s_rx));

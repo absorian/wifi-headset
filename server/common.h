@@ -12,12 +12,12 @@
 #define CL_NAME_MAX 32
 
 typedef struct {
-    char name[CL_NAME_MAX + 1];
-    uint64_t uid;
-    struct sockaddr_in addr;
+	char name[CL_NAME_MAX + 1];
+	uint64_t uid;
+	struct sockaddr_in addr;
 
-    uint16_t audio_port;
-    uint16_t control_port;
+	uint16_t audio_port;
+	uint16_t control_port;
 } cl_conn_info_t;
 
 int discovery_open();

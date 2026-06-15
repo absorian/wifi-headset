@@ -18,51 +18,57 @@ static int s_cl_sock = -1;
 
 int control_transport_alive()
 {
-    if (s_sock < 0 || s_cl_sock < 0) return -1;
+	if (s_sock < 0 || s_cl_sock < 0)
+		return -1;
 
-    int ret = recv(s_sock, NULL, 0, MSG_DONTWAIT | MSG_PEEK);
+	int ret = recv(s_sock, NULL, 0, MSG_DONTWAIT | MSG_PEEK);
 
-    if (ret == 0) {
-        // disconnected
-        return -1;
-    }
-    return 0;
+	if (ret == 0) {
+		// disconnected
+		return -1;
+	}
+	return 0;
 }
 
 int control_transport_accept(const cl_conn_info_t *conn_info)
 {
-    int ret;
-    socklen_t socklen;
-    struct sockaddr_in client;
+	int ret;
+	socklen_t socklen;
+	struct sockaddr_in client;
 
-    if (s_sock < 0 || s_cl_sock >= 0) return 0;
+	if (s_sock < 0 || s_cl_sock >= 0)
+		return 0;
 
-    while (1) {
-        ret = listen(s_sock, 1);
-        if (ret != 0) {
-            fprintf(stderr, "Socket listen failed errno=%d\n", errno);
-            return -1;
-        }
+	while (1) {
+		ret = listen(s_sock, 1);
+		if (ret != 0) {
+			fprintf(stderr, "Socket listen failed errno=%d\n",
+				errno);
+			return -1;
+		}
 
-        socklen = sizeof(client);
-        s_cl_sock = accept(s_sock, (struct sockaddr *)&client, &socklen);
-        if (s_cl_sock == -1) {
-            fprintf(stderr, "Socket accept failed errno=%d\n", errno);
-            return -1;
-        }
+		socklen = sizeof(client);
+		s_cl_sock =
+			accept(s_sock, (struct sockaddr *)&client, &socklen);
+		if (s_cl_sock == -1) {
+			fprintf(stderr, "Socket accept failed errno=%d\n",
+				errno);
+			return -1;
+		}
 
-        if (memcmp(&client.sin_addr, &conn_info->addr.sin_addr,
-                sizeof(client.sin_addr))) {
-            fprintf(stderr, "Socket wrong accept errno=%d\n", errno);
-            close(s_cl_sock);
-            s_cl_sock = -1;
-            continue; 
-        }
+		if (memcmp(&client.sin_addr, &conn_info->addr.sin_addr,
+			   sizeof(client.sin_addr))) {
+			fprintf(stderr, "Socket wrong accept errno=%d\n",
+				errno);
+			close(s_cl_sock);
+			s_cl_sock = -1;
+			continue;
+		}
 
-        break;
-    }
+		break;
+	}
 
-    return 0;
+	return 0;
 }
 
 int control_transport_open_conn(cl_conn_info_t *conn_info)
@@ -84,7 +90,7 @@ int control_transport_open_conn(cl_conn_info_t *conn_info)
 	if (ret < 0) {
 		fprintf(stderr, "Failed to bind socket errno=%d\n", errno);
 		close(s_sock);
-        s_sock = -1;
+		s_sock = -1;
 		return -1;
 	}
 
@@ -93,7 +99,7 @@ int control_transport_open_conn(cl_conn_info_t *conn_info)
 	if (ret < 0) {
 		fprintf(stderr, "Failed to getsockname errno=%d\n", errno);
 		close(s_sock);
-        s_sock = -1;
+		s_sock = -1;
 		return -1;
 	}
 
@@ -107,6 +113,6 @@ void control_transport_close_conn()
 {
 	close(s_cl_sock);
 	close(s_sock);
-    s_cl_sock = -1;
-    s_sock = -1;
+	s_cl_sock = -1;
+	s_sock = -1;
 }

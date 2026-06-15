@@ -26,17 +26,17 @@ int main()
 {
 	int ret;
 	cl_conn_info_t conn_info;
-    struct sigaction act;
+	struct sigaction act;
 
-    act.sa_handler = &sig_handler;
-    act.sa_flags = SA_RESTART;
-    sigemptyset(&act.sa_mask);
+	act.sa_handler = &sig_handler;
+	act.sa_flags = SA_RESTART;
+	sigemptyset(&act.sa_mask);
 
 	ret = sigaction(SIGINT, &act, NULL);
-    if (ret) {
-        fprintf(stderr, "Sigaction registration failed\n");
-        return -1;
-    }
+	if (ret) {
+		fprintf(stderr, "Sigaction registration failed\n");
+		return -1;
+	}
 
 	ret = audio_transport_init();
 	if (ret) {
@@ -45,23 +45,28 @@ int main()
 
 	while (s_run) {
 		ret = discovery_open();
-		if (ret) break;
+		if (ret)
+			break;
 
 		// blocking
 		discovery_capture(&conn_info);
-		
+
 		ret = control_transport_open_conn(&conn_info);
-		if (ret) break;
+		if (ret)
+			break;
 
 		ret = audio_transport_open_conn(&conn_info);
-		if (ret) break;
+		if (ret)
+			break;
 
 		ret = discovery_respond(&conn_info);
-		if (ret) break;
+		if (ret)
+			break;
 
 		// blocking
 		ret = control_transport_accept(&conn_info);
-		if (ret) break;
+		if (ret)
+			break;
 
 		discovery_close();
 		audio_transport_start();
