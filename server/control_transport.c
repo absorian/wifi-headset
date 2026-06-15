@@ -18,11 +18,13 @@ static int s_cl_sock = -1;
 
 int control_transport_alive()
 {
+	uint8_t b;
+	int ret;
+
 	if (s_sock < 0 || s_cl_sock < 0)
 		return -1;
 
-	int ret = recv(s_sock, NULL, 0, MSG_DONTWAIT | MSG_PEEK);
-
+	ret = recv(s_cl_sock, &b, sizeof(b), MSG_DONTWAIT | MSG_PEEK);
 	if (ret == 0) {
 		// disconnected
 		return -1;
@@ -39,18 +41,18 @@ int control_transport_accept(const cl_conn_info_t *conn_info)
 	if (s_sock < 0 || s_cl_sock >= 0)
 		return 0;
 
-	while (1) {
-		ret = listen(s_sock, 1);
-		if (ret != 0) {
-			fprintf(stderr, "Socket listen failed errno=%d\n",
-				errno);
-			return -1;
-		}
-
+	ret = listen(s_sock, 1);
+	if (ret != 0) {
+		fprintf(stderr, "Socket listen failed errno=%d\n", errno);
+		return -1;
+	}
+	while (g_run) {
 		socklen = sizeof(client);
 		s_cl_sock =
 			accept(s_sock, (struct sockaddr *)&client, &socklen);
-		if (s_cl_sock == -1) {
+		if (s_cl_sock < 0) {
+			if (errno == EAGAIN)
+				continue;
 			fprintf(stderr, "Socket accept failed errno=%d\n",
 				errno);
 			return -1;
@@ -65,21 +67,33 @@ int control_transport_accept(const cl_conn_info_t *conn_info)
 			continue;
 		}
 
-		break;
+		return 0;
 	}
 
-	return 0;
+	return -1;
 }
 
 int control_transport_open_conn(cl_conn_info_t *conn_info)
 {
 	int ret;
 	struct sockaddr_in addr;
+	struct timeval timeout;
 	socklen_t socklen;
 
 	s_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
 	if (s_sock < 0) {
 		fprintf(stderr, "Failed to open socket errno=%d\n", errno);
+		return -1;
+	}
+
+	timeout.tv_sec = 0;
+	timeout.tv_usec = 1000 * 100;
+	ret = setsockopt(s_sock, SOL_SOCKET, SO_RCVTIMEO, &timeout,
+			 sizeof timeout);
+	if (ret < 0) {
+		fprintf(stderr, "Failed to set timeout of socket errno=%d\n",
+			errno);
+		close(s_sock);
 		return -1;
 	}
 

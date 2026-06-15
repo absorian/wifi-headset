@@ -5,11 +5,14 @@
 #pragma once
 
 #include <netinet/in.h>
+#include <signal.h>
 
 #define _STR(x) #x
 #define STR(x) _STR(x)
 
 #define CL_NAME_MAX 32
+
+extern volatile sig_atomic_t g_run;
 
 typedef struct {
 	char name[CL_NAME_MAX + 1];
@@ -22,7 +25,7 @@ typedef struct {
 
 int discovery_open();
 void discovery_close();
-void discovery_capture(cl_conn_info_t *cl);
+int discovery_capture(cl_conn_info_t *cl);
 int discovery_respond(const cl_conn_info_t *conn_info);
 
 int control_transport_open_conn(cl_conn_info_t *conn_info);

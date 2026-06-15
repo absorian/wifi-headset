@@ -42,9 +42,6 @@ static void audio_tx_thread(ma_device *pDevice, void *pOutput,
 
 	memcpy(ctx->buf, pInput, frameCount * AUDIO_FRAME_SIZE);
 	ret = send(s_socket, ctx->payload, sizeof(ctx->payload), 0);
-	if (ret < 0) {
-		printf("send failed: errno %d\n", errno);
-	}
 	ctx->hdr->seqnum++;
 }
 

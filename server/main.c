@@ -15,11 +15,11 @@
 #include <string.h>
 #include <errno.h>
 
-static volatile sig_atomic_t s_run = 1;
+volatile sig_atomic_t g_run = 1;
 
 void sig_handler(int sig)
 {
-	s_run = 0;
+	g_run = 0;
 }
 
 int main()
@@ -43,13 +43,15 @@ int main()
 		return -1;
 	}
 
-	while (s_run) {
+	while (g_run) {
 		ret = discovery_open();
 		if (ret)
 			break;
 
 		// blocking
-		discovery_capture(&conn_info);
+		ret = discovery_capture(&conn_info);
+		if (ret)
+			break;
 
 		ret = control_transport_open_conn(&conn_info);
 		if (ret)
@@ -72,7 +74,7 @@ int main()
 		audio_transport_start();
 		printf("Connection successful\n");
 
-		while (s_run) {
+		while (g_run) {
 			ret = control_transport_alive();
 			if (ret) {
 				printf("Remote disconnected\n");

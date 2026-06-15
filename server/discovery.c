@@ -17,7 +17,7 @@
 
 static int s_sock;
 
-void discovery_capture(cl_conn_info_t *cl)
+int discovery_capture(cl_conn_info_t *cl)
 {
 	int ret;
 	socklen_t socklen;
@@ -26,11 +26,13 @@ void discovery_capture(cl_conn_info_t *cl)
 
 	printf("Listening for broadcast signals\n");
 
-	while (1) {
+	while (g_run) {
 		socklen = sizeof(cl->addr);
 		ret = recvfrom(s_sock, rx_buf, sizeof(rx_buf), 0,
 			       (struct sockaddr *)&cl->addr, &socklen);
 		if (ret < 0) {
+			if (errno == EAGAIN)
+				continue;
 			fprintf(stderr, "recvfrom failed errno=%d\n", errno);
 			continue;
 		}
@@ -47,8 +49,9 @@ void discovery_capture(cl_conn_info_t *cl)
 
 		printf("Found device '%s' at %s:%hu\n", cl->name,
 		       inet_ntoa(cl->addr.sin_addr), ntohs(cl->addr.sin_port));
-		break;
+		return 0;
 	}
+	return -1;
 }
 
 int discovery_respond(const cl_conn_info_t *cl)
@@ -76,12 +79,25 @@ int discovery_open()
 {
 	int ret;
 	struct sockaddr_in bind_addr;
+	struct timeval timeout;
 
 	s_sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
 	if (s_sock < 0) {
 		fprintf(stderr, "Failed to open socket errno=%d\n", errno);
 		return -1;
 	}
+
+	timeout.tv_sec = 0;
+	timeout.tv_usec = 1000 * 100;
+	ret = setsockopt(s_sock, SOL_SOCKET, SO_RCVTIMEO, &timeout,
+			 sizeof timeout);
+	if (ret < 0) {
+		fprintf(stderr, "Failed to set timeout of socket errno=%d\n",
+			errno);
+		close(s_sock);
+		return -1;
+	}
+
 	bind_addr.sin_family = AF_INET;
 	bind_addr.sin_addr.s_addr = INADDR_ANY;
 	bind_addr.sin_port = htons(SV_DISCOVERY_PORT);

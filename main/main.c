@@ -54,17 +54,20 @@ static void main_event_handler(void *handler_arg, esp_event_base_t base,
 		if (s_app_mode == to)
 			break;
 		ESP_LOGI(TAG, "Mode switch %d -> %d", s_app_mode, to);
-		vTaskDelay(pdMS_TO_TICKS(500));
 		// deinit
 		switch (s_app_mode) {
 		case APP_MODE_CONF:
+			// To send all the responses
+			vTaskDelay(pdMS_TO_TICKS(500));
 			captive_server_stop();
 			break;
 		case APP_MODE_MAIN:
-			audio_transport_stop();
 			control_transport_stop();
+			audio_transport_stop();
 			i2s_periph_deinit();
 			discovery_stop();
+			// To close TCP connection
+			vTaskDelay(pdMS_TO_TICKS(500));
 			break;
 		case APP_MODE_SLEEP:
 			esp_netif_init();
