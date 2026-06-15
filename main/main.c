@@ -5,6 +5,7 @@
 #include "common.h"
 
 #include "esp_check.h"
+#include "esp_sleep.h"
 #include "esp_event.h"
 #include "esp_netif.h"
 #include "nvs_flash.h"
@@ -70,6 +71,7 @@ static void main_event_handler(void *handler_arg, esp_event_base_t base,
 				discovery_stop();
 				break;
 			case APP_MODE_SLEEP:
+				esp_netif_init();
 				esp_event_loop_create_default();
 				wifi_handle_init();
 				break;
@@ -88,8 +90,9 @@ static void main_event_handler(void *handler_arg, esp_event_base_t base,
 			case APP_MODE_SLEEP:
 				wifi_handle_deinit();
 				esp_event_loop_delete_default();
-				// go to sleep
-				// setup wakeup
+				esp_netif_deinit();
+
+				esp_deep_sleep_start();
 				break;
 		}
 		break;
@@ -128,6 +131,14 @@ void app_main(void)
 	esp_event_loop_args_t event_loop_args = { .queue_size = 8,
 						  .task_name = NULL };
 
+	ESP_ERROR_CHECK(
+		esp_event_loop_create(&event_loop_args, &g_main_event_loop));
+	ESP_ERROR_CHECK(esp_event_handler_register_with(
+		g_main_event_loop, APP_MAIN, ESP_EVENT_ANY_ID,
+		main_event_handler, NULL));
+
+	periph_init();
+
 	err = nvs_flash_init();
 	if (err == ESP_ERR_NVS_NO_FREE_PAGES ||
 	    err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -137,18 +148,6 @@ void app_main(void)
 		err = nvs_flash_init();
 	}
 	ESP_ERROR_CHECK(err);
-
-	ESP_ERROR_CHECK(
-		esp_event_loop_create(&event_loop_args, &g_main_event_loop));
-	ESP_ERROR_CHECK(esp_event_handler_register_with(
-		g_main_event_loop, APP_MAIN, ESP_EVENT_ANY_ID,
-		main_event_handler, NULL));
-
-	ESP_ERROR_CHECK(esp_netif_init());
-
-	periph_init();
-	esp_event_post_to(g_main_event_loop, APP_MAIN, APP_POWER_SWITCH,
-					  NULL, 0, portMAX_DELAY);
 
 	while (1) {
 		esp_event_loop_run(g_main_event_loop, pdMS_TO_TICKS(10));
