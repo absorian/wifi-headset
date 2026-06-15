@@ -146,6 +146,7 @@ void app_main(void)
 
 	ESP_ERROR_CHECK(esp_netif_init());
 
+	periph_init();
 	esp_event_post_to(g_main_event_loop, APP_MAIN, APP_POWER_SWITCH,
 					  NULL, 0, portMAX_DELAY);
 

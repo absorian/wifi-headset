@@ -41,6 +41,9 @@ void audio_transport_stop(void);
 void i2s_periph_init(void);
 void i2s_periph_deinit(void);
 
+void periph_init();
+void periph_deinit();
+
 ESP_EVENT_DECLARE_BASE(APP_MAIN);
 extern esp_event_loop_handle_t g_main_event_loop;
 
