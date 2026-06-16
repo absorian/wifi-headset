@@ -57,13 +57,13 @@ static void periph_btn_tick(periph_btn_ctx_t *ctx, uint32_t tick_tm)
 	if (level != ctx->last_level) {
 		if (level == PERIPH_BTN_PRESSED_LEVEL &&
 		    ctx->debounce_tm >= PERIPH_BTN_DEBOUNCE_MS) {
+			ctx->long_press = false;
 			ctx->press_tm = 0;
 			ctx->last_level = level;
 		}
 
 		if (level != PERIPH_BTN_PRESSED_LEVEL) {
 			ctx->click_count++;
-
 			ctx->debounce_tm = 0;
 			ctx->last_level = level;
 		}
@@ -134,20 +134,17 @@ static void periph_main_btn_handler(periph_btn_ctx_t *ctx)
 {
 	// ESP_LOGI(TAG, "main btn clicks=%d long_press=%d, long_click=%d",
 	//     ctx->click_count, ctx->long_press, ctx->long_click);
-	if (ctx->long_press && !ctx->click_count) {
-		// just a long press
-		xEventGroupSetBits(s_wakeup_evt, PERIPH_WAKEUP_BIT);
-	}
-	if (ctx->long_click) {
+	if (ctx->long_press) {
 		switch (ctx->click_count) {
-		case 1:
-			// one long click
+		case 0:
+			// just a long press
+			xEventGroupSetBits(s_wakeup_evt, PERIPH_WAKEUP_BIT);
 			esp_event_post_to(g_main_event_loop, APP_MAIN,
 					  APP_POWER_SWITCH, NULL, 0,
 					  portMAX_DELAY);
 			break;
-		case 3:
-			// double click + one long click
+		case 2:
+			// double click + long press
 			esp_event_post_to(g_main_event_loop, APP_MAIN,
 					  APP_CONF_SWITCH, NULL, 0,
 					  portMAX_DELAY);
