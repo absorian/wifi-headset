@@ -143,6 +143,13 @@ void app_main(void)
 
 	periph_init();
 
+	if (esp_sleep_get_wakeup_causes() & BIT(ESP_SLEEP_WAKEUP_UNDEFINED)) {
+		esp_event_post_to(g_main_event_loop, APP_MAIN, APP_POWER_SWITCH,
+				  NULL, 0, portMAX_DELAY);
+	} else if (!periph_did_wakeup()) {
+		esp_deep_sleep_start();
+	}
+
 	err = nvs_flash_init();
 	if (err == ESP_ERR_NVS_NO_FREE_PAGES ||
 	    err == ESP_ERR_NVS_NEW_VERSION_FOUND) {

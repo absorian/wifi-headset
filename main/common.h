@@ -8,6 +8,8 @@
 #include "esp_err.h"
 #include "esp_event.h"
 
+#include <stdbool.h>
+
 #define HOST_SSID_MAX 32
 #define HOST_PASS_MAX 32
 
@@ -49,6 +51,7 @@ enum periph_status_led_mode {
 };
 
 void periph_init();
+bool periph_did_wakeup();
 void periph_deinit();
 void periph_status_led_mode_set(enum periph_status_led_mode mode);
 

@@ -11,6 +11,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <stdatomic.h>
+#include <stdbool.h>
 
 static const char *TAG = "appPRPH";
 
@@ -158,17 +159,16 @@ static void periph_main_btn_handler(periph_btn_ctx_t *ctx)
 void periph_init()
 {
 	gpio_config_t io_conf = {};
-	EventBits_t bits;
 
 	if (s_task != NULL)
 		return;
 
 	io_conf.mode = GPIO_MODE_INPUT;
-	io_conf.pin_bit_mask = (1ULL << PERIPH_MAIN_BTN_GPIO);
+	io_conf.pin_bit_mask = BIT64(PERIPH_MAIN_BTN_GPIO);
 	io_conf.pull_down_en = GPIO_PULLDOWN_ENABLE;
 	gpio_config(&io_conf);
 
-	esp_deep_sleep_enable_gpio_wakeup(io_conf.pin_bit_mask,
+	esp_deep_sleep_enable_gpio_wakeup(BIT64(PERIPH_MAIN_BTN_GPIO),
 					  ESP_GPIO_WAKEUP_GPIO_HIGH);
 
 	s_main_btn = (periph_btn_ctx_t){};
@@ -179,7 +179,7 @@ void periph_init()
 	// Configure LED
 	io_conf = (gpio_config_t){};
 	io_conf.mode = GPIO_MODE_OUTPUT;
-	io_conf.pin_bit_mask = (1ULL << PERIPH_STATUS_LED_GPIO);
+	io_conf.pin_bit_mask = BIT64(PERIPH_STATUS_LED_GPIO);
 	gpio_config(&io_conf);
 
 	s_led_mode = STATUS_LED_OFF;
@@ -189,15 +189,19 @@ void periph_init()
 	s_wakeup_evt = xEventGroupCreate();
 	xTaskCreate(periph_task, "app_periph", 2048, NULL, 0, &s_task);
 
+	periph_status_led_mode_set(STATUS_LED_OFF);
+}
+
+bool periph_did_wakeup()
+{
+	EventBits_t bits;
+
 	bits = xEventGroupWaitBits(s_wakeup_evt, PERIPH_WAKEUP_BIT, pdTRUE,
 				   pdTRUE,
 				   pdMS_TO_TICKS(PERIPH_BTN_LONG_CLICK_MS +
 						 PERIPH_BTN_DEBOUNCE_MS * 2));
 
-	if ((bits & PERIPH_WAKEUP_BIT) == 0) {
-		periph_deinit();
-		esp_deep_sleep_start();
-	}
+	return (bits & PERIPH_WAKEUP_BIT);
 }
 
 void periph_deinit()
