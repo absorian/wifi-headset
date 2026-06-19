@@ -1,48 +1,40 @@
 /*
  * SPDX-License-Identifier: GPL-3.0-only
+ *
+ * Server audio device glue: captures from a miniaudio input device and hands
+ * frames to the shared audio transport component, which owns the socket, the
+ * receive thread, retransmission and the jitter buffer.
  */
 
 #include "common.h"
+#include "audio_transport.h"
+#include "pkt.h"
 #include <miniaudio.h>
 
-#include <sys/socket.h>
-#include <netinet/in.h>
 #include <arpa/inet.h>
-#include <pthread.h>
-#include <unistd.h>
+#include <stdint.h>
 #include <stdio.h>
-#include <errno.h>
 #include <stdlib.h>
-#include <string.h>
 
-#define AUDIO_BUF_SIZE 512
+#define AUDIO_NUM_CHAN 2
+#define AUDIO_FRAME_SIZE (sizeof(int16_t) * AUDIO_NUM_CHAN)
 
-#define AUDIO_FRAME_SIZE (2 * 2)
+/* Retransmit history depth and jitter buffer geometry. */
+#define HISTORY_SIZE 256
+#define JITTER_CAPACITY 64
+#define JITTER_TARGET_DEPTH 3
 
-typedef struct {
-	uint16_t seqnum;
-} audio_hdr_t;
-
-static int s_socket = -1;
 static ma_context s_ma_ctx;
 static ma_device s_spk_src_dev;
 static ma_device s_mic_dest_dev;
 
-typedef struct {
-	uint8_t payload[AUDIO_BUF_SIZE + sizeof(audio_hdr_t)];
-	audio_hdr_t *hdr;
-	uint8_t *buf;
-} audio_tx_ctx_t;
-
 static void audio_tx_thread(ma_device *pDevice, void *pOutput,
 			    const void *pInput, ma_uint32 frameCount)
 {
-	audio_tx_ctx_t *ctx = (audio_tx_ctx_t *)pDevice->pUserData;
-	int ret;
+	(void)pDevice;
+	(void)pOutput;
 
-	memcpy(ctx->buf, pInput, frameCount * AUDIO_FRAME_SIZE);
-	ret = send(s_socket, ctx->payload, sizeof(ctx->payload), 0);
-	ctx->hdr->seqnum++;
+	audio_transport_send(pInput, frameCount * AUDIO_FRAME_SIZE);
 }
 
 static void audio_transport_select_dev(const ma_device_id **capture,
@@ -86,46 +78,19 @@ void audio_transport_stop()
 
 int audio_transport_open_conn(cl_conn_info_t *conn_info)
 {
-	int ret;
-	struct sockaddr_in addr;
-	socklen_t socklen;
+	audio_transport_cfg_t cfg = {
+		.local_port = 0, // ephemeral
+		.remote_ip = inet_ntoa(conn_info->addr.sin_addr),
+		.remote_port = 0, // symmetric: send to our bound port
+		.slot_size = AUDIO_BUF_SIZE,
+		.num_chan = AUDIO_NUM_CHAN,
+		.jitter_cap = JITTER_CAPACITY,
+		.jitter_target = JITTER_TARGET_DEPTH,
+		.history_size = HISTORY_SIZE,
+	};
 
-	s_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
-	if (s_socket < 0) {
-		fprintf(stderr, "Failed to open socket errno=%d\n", errno);
-		return -1;
-	}
-
-	addr.sin_family = AF_INET;
-	addr.sin_addr.s_addr = INADDR_ANY;
-	addr.sin_port = htons(0);
-	ret = bind(s_socket, (struct sockaddr *)&addr, sizeof(addr));
-	if (ret < 0) {
-		fprintf(stderr, "Failed to bind socket errno=%d\n", errno);
-		close(s_socket);
-		s_socket = -1;
-		return -1;
-	}
-
-	socklen = sizeof(addr);
-	ret = getsockname(s_socket, (struct sockaddr *)&addr, &socklen);
-	if (ret < 0) {
-		fprintf(stderr, "Failed to getsockname errno=%d\n", errno);
-		close(s_socket);
-		s_socket = -1;
-		return -1;
-	}
-
-	// Set the selected port to send back to cl
-	conn_info->audio_port = ntohs(addr.sin_port);
-
-	// Connect to cl on the same port
-	addr.sin_addr = conn_info->addr.sin_addr;
-	ret = connect(s_socket, (struct sockaddr *)&addr, sizeof(addr));
-	if (ret < 0) {
-		fprintf(stderr, "Failed to connect errno=%d\n", errno);
-		close(s_socket);
-		s_socket = -1;
+	if (audio_transport_open(&cfg, &conn_info->audio_port) != 0) {
+		fprintf(stderr, "Failed to open audio transport\n");
 		return -1;
 	}
 
@@ -134,12 +99,11 @@ int audio_transport_open_conn(cl_conn_info_t *conn_info)
 
 void audio_transport_close_conn()
 {
-	close(s_socket);
+	audio_transport_close();
 }
 
 int audio_transport_init()
 {
-	audio_tx_ctx_t *ctx;
 	ma_result ret;
 	ma_device_config config = ma_device_config_init(ma_device_type_capture);
 	ret = ma_context_init(NULL, 0, NULL, &s_ma_ctx);
@@ -148,33 +112,21 @@ int audio_transport_init()
 		return -1;
 	}
 
-	ctx = malloc(sizeof(audio_tx_ctx_t));
-	if (ctx == NULL) {
-		fprintf(stderr, "Failed to malloc\n");
-		return -1;
-	}
-
-	ctx->hdr = (audio_hdr_t *)ctx->payload;
-	ctx->buf = ctx->payload + sizeof(audio_hdr_t);
-
 	config.periodSizeInFrames = AUDIO_BUF_SIZE / AUDIO_FRAME_SIZE;
 	// Set to 0 to use the device's native channel count.
 	config.capture.format = ma_format_s16;
 	// Set to 0 to use the device's native channel count.
-	config.capture.channels = 2;
+	config.capture.channels = AUDIO_NUM_CHAN;
 	// Set to 0 to use the device's native sample rate.
 	config.sampleRate = 44100;
 	// This function will be called when miniaudio needs more data.
 	config.dataCallback = audio_tx_thread;
-	// Can be accessed from the device object (device.pUserData).
-	config.pUserData = ctx;
 
 	audio_transport_select_dev(&config.capture.pDeviceID, NULL);
 
 	ret = ma_device_init(&s_ma_ctx, &config, &s_spk_src_dev);
 	if (ret != MA_SUCCESS) {
 		fprintf(stderr, "Failed to init spk_src ma_device: %d\n", ret);
-		free(ctx);
 		return -1;
 	}
 
@@ -183,8 +135,6 @@ int audio_transport_init()
 
 void audio_transport_deinit()
 {
-	free(s_spk_src_dev.pUserData);
-
 	ma_device_uninit(&s_spk_src_dev);
 	ma_context_uninit(&s_ma_ctx);
 }

@@ -63,7 +63,6 @@ static void main_event_handler(void *handler_arg, esp_event_base_t base,
 			break;
 		case APP_MODE_MAIN:
 			control_transport_stop();
-			audio_transport_stop();
 			i2s_periph_deinit();
 			discovery_stop();
 			// To close TCP connection
@@ -108,17 +107,17 @@ static void main_event_handler(void *handler_arg, esp_event_base_t base,
 		ESP_LOGI(TAG, "Host found ip=%s udp=%hu tcp=%hu", info->ip,
 			 info->udp_port, info->tcp_port);
 		control_transport_start(info);
-		audio_transport_setup(info);
+		i2s_periph_open(info);
 		break;
 	case APP_HOST_CONNECTED:
 		ESP_LOGI(TAG, "Host connected");
 		periph_status_led_mode_set(STATUS_LED_OFF);
 		discovery_stop();
-		audio_transport_start();
+		i2s_periph_start();
 		break;
 	case APP_HOST_DISCONNECTED:
 		ESP_LOGI(TAG, "Host diconnected");
-		audio_transport_stop();
+		i2s_periph_close();
 		control_transport_stop();
 		discovery_start();
 		periph_status_led_mode_set(STATUS_LED_BLINK);

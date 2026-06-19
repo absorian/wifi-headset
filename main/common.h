@@ -36,10 +36,10 @@ void discovery_stop(void);
 void control_transport_start(const host_conn_info_t *info);
 void control_transport_stop();
 
-void audio_transport_setup(const host_conn_info_t *info);
-void audio_transport_start(void);
-void audio_transport_stop(void);
-
+void i2s_periph_start(void);
+void i2s_periph_stop(void);
+void i2s_periph_open(const host_conn_info_t *info);
+void i2s_periph_close(void);
 void i2s_periph_init(void);
 void i2s_periph_deinit(void);
 

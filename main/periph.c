@@ -168,6 +168,7 @@ void periph_init()
 	io_conf.pull_down_en = GPIO_PULLDOWN_ENABLE;
 	gpio_config(&io_conf);
 
+	esp_sleep_config_gpio_isolate();
 	esp_deep_sleep_enable_gpio_wakeup(BIT64(PERIPH_MAIN_BTN_GPIO),
 					  ESP_GPIO_WAKEUP_GPIO_HIGH);
 
@@ -183,7 +184,6 @@ void periph_init()
 	gpio_config(&io_conf);
 
 	s_led_mode = STATUS_LED_OFF;
-	esp_rom_gpio_pad_select_gpio(PERIPH_STATUS_LED_GPIO);
 	gpio_deep_sleep_hold_en();
 
 	s_wakeup_evt = xEventGroupCreate();

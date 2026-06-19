@@ -76,6 +76,7 @@ int control_transport_accept(const cl_conn_info_t *conn_info)
 int control_transport_open_conn(cl_conn_info_t *conn_info)
 {
 	int ret;
+	int optval = 1;
 	struct sockaddr_in addr;
 	struct timeval timeout;
 	socklen_t socklen;
@@ -92,6 +93,14 @@ int control_transport_open_conn(cl_conn_info_t *conn_info)
 			 sizeof timeout);
 	if (ret < 0) {
 		fprintf(stderr, "Failed to set timeout of socket errno=%d\n",
+			errno);
+		close(s_sock);
+		return -1;
+	}
+
+	ret = setsockopt(s_sock, SOL_SOCKET, SO_KEEPALIVE, &optval, sizeof(optval));
+	if (ret < 0) {
+		fprintf(stderr, "Failed to set keepalive on socket errno=%d\n",
 			errno);
 		close(s_sock);
 		return -1;
