@@ -12,6 +12,7 @@
 #include "esp_log.h"
 #include "esp_check.h"
 #include "esp_sleep.h"
+#include "esp_timer.h"
 
 #include "driver/i2s_std.h"
 #include "driver/gpio.h"
@@ -39,8 +40,8 @@ static i2s_chan_handle_t s_i2s_rx;
 
 #define MIC_SAMPLE_RATE 48000
 #define MIC_BITS_PER_SAMPLE 16
-#define MIC_FRAME_DMS 75
-#define MIC_NBYTE 90
+#define MIC_FRAME_DMS 100
+#define MIC_NBYTE 120
 
 static TaskHandle_t s_play_task = NULL;
 static TaskHandle_t s_mic_task = NULL;
@@ -203,17 +204,43 @@ static void audio_mic_task(void *param)
 	esp_audio_enc_in_frame_t in = { .buffer = (uint8_t *)s_mic_pcm };
 	esp_audio_enc_out_frame_t out = { .buffer = s_mic_enc };
 
-	ESP_LOGI(TAG, "Mic capture starting");
+	// Instrumentation: confirm whether the encode keeps up with real time
+	// (saturation) or the loop is spinning on read errors.
+	int64_t enc_us = 0;
+	int frames = 0, read_err = 0;
+	int64_t window_start = esp_timer_get_time();
+
+	ESP_LOGI(TAG, "Mic capture starting (frame budget %d us)",
+		 MIC_FRAME_DMS * 100);
 
 	while (s_mic_task) {
-		if (i2s_channel_read(s_i2s_rx, s_mic_pcm, s_enc_in_size,
-				     &nread, portMAX_DELAY) != ESP_OK)
+		if (i2s_channel_read(s_i2s_rx, s_mic_pcm, s_enc_in_size, &nread,
+				     portMAX_DELAY) != ESP_OK) {
+			read_err++;
+			vTaskDelay(1); // avoid a tight spin if reads error
 			continue;
+		}
 
+		int64_t t0 = esp_timer_get_time();
 		in.len = nread;
 		out.len = s_enc_out_size;
 		if (esp_lc3_enc_process(s_enc, &in, &out) == ESP_AUDIO_ERR_OK)
 			audio_transport_send(s_mic_enc, out.encoded_bytes);
+		enc_us += esp_timer_get_time() - t0;
+		frames++;
+
+		if (frames >= 500) {
+			int64_t now = esp_timer_get_time();
+			ESP_LOGI(
+				TAG,
+				"mic: enc avg=%lld us, %d frames in %lld ms, read_err=%d",
+				enc_us / frames, frames,
+				(now - window_start) / 1000, read_err);
+			enc_us = 0;
+			frames = 0;
+			read_err = 0;
+			window_start = now;
+		}
 	}
 	vTaskDelete(NULL);
 }

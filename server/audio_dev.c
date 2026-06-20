@@ -23,8 +23,8 @@
 #define JITTER_TARGET_DEPTH 3
 
 #define MIC_SAMPLE_RATE 48000
-#define MIC_DT_US 7500
-#define MIC_NBYTE 90
+#define MIC_DT_US 10000
+#define MIC_NBYTE 120
 
 static ma_context s_ma_ctx;
 static ma_device s_spk_src_dev;
