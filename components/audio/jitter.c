@@ -23,6 +23,7 @@ struct jitter_buffer {
 	uint8_t num_chan;
 	uint16_t slot_cap;
 	uint16_t target_diff;
+	jitter_conceal_t conceal;
 
 	bool started; // prebuffer satisfied, playback running
 	bool anchored; // read_seq/write_seq are valid
@@ -70,6 +71,11 @@ static void conceal_into(jitter_buffer_t *jb, void *out)
 
 	jb->was_concealed = true;
 
+	if (jb->conceal == JITTER_CONCEAL_NONE) {
+		memset(out, 0, jb->slot_size);
+		return;
+	}
+
 	if (!jb->have_last || jb->conceal_gain <= 0.0f) {
 		memset(out, 0, jb->slot_size);
 		jb->conceal_gain = 0.0f;
@@ -87,7 +93,8 @@ static void conceal_into(jitter_buffer_t *jb, void *out)
 }
 
 jitter_buffer_t *jitter_create(uint32_t slot_size, uint8_t num_chan,
-			       uint16_t slot_cap, uint16_t target_depth)
+			       uint16_t slot_cap, uint16_t target_depth,
+			       jitter_conceal_t conceal)
 {
 	jitter_buffer_t *jb;
 
@@ -102,6 +109,7 @@ jitter_buffer_t *jitter_create(uint32_t slot_size, uint8_t num_chan,
 	jb->num_chan = num_chan;
 	jb->slot_cap = slot_cap;
 	jb->target_diff = target_depth;
+	jb->conceal = conceal;
 	jb->conceal_gain = 1.0f;
 
 	if (pthread_mutex_init(&jb->mtx, NULL) != 0) {
@@ -111,8 +119,11 @@ jitter_buffer_t *jitter_create(uint32_t slot_size, uint8_t num_chan,
 
 	jb->slots = calloc(slot_cap, sizeof(*jb->slots));
 	jb->storage = calloc(slot_cap, slot_size);
-	jb->last_slot = calloc(1, slot_size);
-	if (jb->slots == NULL || jb->storage == NULL || jb->last_slot == NULL) {
+	/* last_slot only feeds the PCM gain-fade concealment. */
+	if (conceal == JITTER_CONCEAL_PCM)
+		jb->last_slot = calloc(1, slot_size);
+	if (jb->slots == NULL || jb->storage == NULL ||
+	    (conceal == JITTER_CONCEAL_PCM && jb->last_slot == NULL)) {
 		jitter_destroy(jb);
 		return NULL;
 	}
@@ -212,12 +223,15 @@ jitter_frame_t jitter_get(jitter_buffer_t *jb, void *out)
 		jb->slots_count--;
 		jb->read_seq++;
 
-		memcpy(jb->last_slot, out, jb->slot_size);
-		jb->have_last = true;
-		if (jb->was_concealed && jb->conceal_gain < 1.0f)
-			apply_gain_ramp(out, jb->slot_size, jb->num_chan,
-					jb->conceal_gain, 1.0f);
-		jb->conceal_gain = 1.0f;
+		if (jb->conceal == JITTER_CONCEAL_PCM) {
+			memcpy(jb->last_slot, out, jb->slot_size);
+			jb->have_last = true;
+			if (jb->was_concealed && jb->conceal_gain < 1.0f)
+				apply_gain_ramp(out, jb->slot_size,
+						jb->num_chan, jb->conceal_gain,
+						1.0f);
+			jb->conceal_gain = 1.0f;
+		}
 		jb->was_concealed = false;
 
 		pthread_mutex_unlock(&jb->mtx);

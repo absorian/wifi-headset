@@ -1,3 +1,6 @@
 [submodule "server/miniaudio"]
 	path = server/miniaudio
 	url = https://github.com/mackron/miniaudio.git
+[submodule "server/liblc3"]
+	path = server/liblc3
+	url = https://github.com/google/liblc3.git

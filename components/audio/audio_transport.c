@@ -73,7 +73,6 @@ static void history_resend_nacks(const nack_pkt_t *nack)
 		pkt_add_audio(&pkt, e->pkt.seqnum, e->pkt.data, e->pkt.size);
 		pkt_send(&pkt);
 	}
-
 }
 
 static void nack_send(const uint16_t *seqs, uint32_t count)
@@ -184,7 +183,7 @@ int audio_transport_open(const audio_transport_cfg_t *cfg,
 		goto err;
 
 	s_jb = jitter_create(cfg->slot_size, cfg->num_chan, cfg->jitter_cap,
-			     cfg->jitter_target);
+			     cfg->jitter_target, cfg->conceal);
 	if (s_jb == NULL)
 		goto err;
 
@@ -219,8 +218,6 @@ err:
 
 void audio_transport_close(void)
 {
-	struct retx_node *n;
-
 	if (s_sock < 0)
 		return;
 

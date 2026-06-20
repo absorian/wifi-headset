@@ -18,8 +18,14 @@ typedef enum {
 	JITTER_FRAME_PREBUFFER,
 } jitter_frame_t;
 
+typedef enum {
+	JITTER_CONCEAL_PCM,
+	JITTER_CONCEAL_NONE,
+} jitter_conceal_t;
+
 jitter_buffer_t *jitter_create(uint32_t slot_size, uint8_t num_chan,
-			       uint16_t slot_cap, uint16_t target_depth);
+			       uint16_t slot_cap, uint16_t target_depth,
+			       jitter_conceal_t conceal);
 void jitter_destroy(jitter_buffer_t *jb);
 
 void jitter_put(jitter_buffer_t *jb, uint16_t seqnum, const void *data,

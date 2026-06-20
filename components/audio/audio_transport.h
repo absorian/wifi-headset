@@ -13,11 +13,12 @@ typedef struct {
 	const char *remote_ip;
 	uint16_t remote_port; // 0 = symmetric (connect to the bound local port)
 
-	uint32_t slot_size; // audio bytes per packet
+	uint32_t slot_size; // inbound audio bytes per packet
 	uint8_t num_chan;
 	uint16_t jitter_cap; // jitter buffer slot count
 	uint16_t jitter_target; // packets to prebuffer before playback
 	uint16_t history_size; // retransmit history depth, 0 = no retransmit
+	jitter_conceal_t conceal; // concealment for the inbound stream
 } audio_transport_cfg_t;
 
 int audio_transport_open(const audio_transport_cfg_t *cfg,
