@@ -15,6 +15,7 @@ typedef struct {
 
 	uint32_t slot_size; // inbound audio bytes per packet
 	uint8_t num_chan;
+	bool jitter_enable; // false = latest-frame passthrough
 	uint16_t jitter_cap; // jitter buffer slot count
 	uint16_t jitter_target; // packets to prebuffer before playback
 	uint16_t history_size; // retransmit history depth, 0 = no retransmit

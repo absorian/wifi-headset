@@ -37,6 +37,51 @@ static uint16_t s_tx_seq; // next outbound audio seqnum
 static pthread_t s_rx_thread;
 static atomic_int s_rx_run;
 
+// Latest-frame passthrough, used when the jitter buffer is disabled.
+static bool s_jitter_enable;
+static uint8_t *s_pass_buf;
+static uint32_t s_pass_size;
+static uint16_t s_pass_seq;
+static bool s_pass_have;
+static bool s_pass_new;
+static pthread_mutex_t s_pass_mtx = PTHREAD_MUTEX_INITIALIZER;
+
+static inline int seq_diff16(uint16_t a, uint16_t b)
+{
+	return (int16_t)(a - b);
+}
+
+static void passthrough_put(uint16_t seq, const void *data, uint32_t len)
+{
+	pthread_mutex_lock(&s_pass_mtx);
+	if (!s_pass_have || seq_diff16(seq, s_pass_seq) > 0) {
+		if (len > s_pass_size)
+			len = s_pass_size;
+		memcpy(s_pass_buf, data, len);
+		s_pass_seq = seq;
+		s_pass_have = true;
+		s_pass_new = true;
+	}
+	pthread_mutex_unlock(&s_pass_mtx);
+}
+
+static jitter_frame_t passthrough_get(void *out)
+{
+	jitter_frame_t r;
+
+	pthread_mutex_lock(&s_pass_mtx);
+	if (!s_pass_have) {
+		memset(out, 0, s_pass_size);
+		r = JITTER_FRAME_PREBUFFER;
+	} else {
+		memcpy(out, s_pass_buf, s_pass_size);
+		r = s_pass_new ? JITTER_FRAME_OK : JITTER_FRAME_CONCEAL;
+		s_pass_new = false;
+	}
+	pthread_mutex_unlock(&s_pass_mtx);
+	return r;
+}
+
 static void pkt_send(const pkt_t *pkt)
 {
 	send(s_sock, pkt, pkt_get_size(pkt), 0);
@@ -98,6 +143,8 @@ void audio_transport_send(const void *audio, uint32_t size)
 
 jitter_frame_t audio_transport_recv(void *out)
 {
+	if (!s_jitter_enable)
+		return passthrough_get(out);
 	return jitter_get(s_jb, out);
 }
 
@@ -127,6 +174,11 @@ static void *rx_thread(void *arg)
 
 		audio = pkt_get_audio(&pkt);
 		if (audio != NULL) {
+			if (!s_jitter_enable) {
+				passthrough_put(audio->seqnum, audio->data,
+						audio->size);
+				continue;
+			}
 			jitter_put(s_jb, audio->seqnum, audio->data,
 				   audio->size, nacks, &n_nacks);
 			if (n_nacks > 0)
@@ -182,10 +234,21 @@ int audio_transport_open(const audio_transport_cfg_t *cfg,
 	if (ret < 0)
 		goto err;
 
-	s_jb = jitter_create(cfg->slot_size, cfg->num_chan, cfg->jitter_cap,
-			     cfg->jitter_target, cfg->conceal);
-	if (s_jb == NULL)
-		goto err;
+	s_jitter_enable = cfg->jitter_enable;
+	if (s_jitter_enable) {
+		s_jb = jitter_create(cfg->slot_size, cfg->num_chan,
+				     cfg->jitter_cap, cfg->jitter_target,
+				     cfg->conceal);
+		if (s_jb == NULL)
+			goto err;
+	} else {
+		s_pass_size = cfg->slot_size;
+		s_pass_have = false;
+		s_pass_new = false;
+		s_pass_buf = calloc(1, s_pass_size);
+		if (s_pass_buf == NULL)
+			goto err;
+	}
 
 	s_history_size = cfg->history_size;
 	if (s_history_size > 0) {
@@ -211,6 +274,8 @@ err:
 	s_jb = NULL;
 	free(s_history);
 	s_history = NULL;
+	free(s_pass_buf);
+	s_pass_buf = NULL;
 	close(s_sock);
 	s_sock = -1;
 	return -1;
@@ -231,4 +296,6 @@ void audio_transport_close(void)
 	s_jb = NULL;
 	free(s_history);
 	s_history = NULL;
+	free(s_pass_buf);
+	s_pass_buf = NULL;
 }

@@ -4,9 +4,11 @@
 
 #include "common.h"
 #include "audio_transport.h"
+#include "audio_config.h"
 #include "pkt.h"
 
 #include "esp_lc3_enc.h"
+#include "esp_lc3_dec.h"
 
 #include "esp_task_wdt.h"
 #include "esp_log.h"
@@ -19,6 +21,7 @@
 #include "driver/rtc_io.h"
 
 #include <stdlib.h>
+#include <string.h>
 
 static const char *TAG = "appI2S";
 
@@ -32,36 +35,36 @@ static i2s_chan_handle_t s_i2s_rx;
 
 #define AUDIO_NUM_CHAN 2
 
-// In slots
-#define JITTER_CAPACITY 64
-#define JITTER_TARGET_DEPTH 3
-
+#define JITTER_CAPACITY 64 // slots
 #define MIC_HISTORY_SIZE 32
 
-#define MIC_SAMPLE_RATE 48000
+#define LC3_FRAME_DMS (AUDIO_LC3_FRAME_US / 100)
 #define MIC_BITS_PER_SAMPLE 16
-#define MIC_FRAME_DMS 100
-#define MIC_NBYTE 120
+#define SPK_FRAME_SAMPLES (AUDIO_SAMPLE_RATE / 1000 * AUDIO_LC3_FRAME_US / 1000)
 
 static TaskHandle_t s_play_task = NULL;
 static TaskHandle_t s_mic_task = NULL;
 static bool s_open = false;
 
+#if AUDIO_MIC_ENABLE && AUDIO_LC3_MIC_ENABLE
 static void *s_enc;
 static int s_enc_in_size; // PCM bytes consumed per encode
 static int s_enc_out_size; // max encoded bytes produced per encode
 static int16_t *s_mic_pcm; // 16-bit PCM
 static uint8_t *s_mic_enc; // encoded LC3 frame
+#endif
+
+#if AUDIO_LC3_SPK_ENABLE
+static void *s_dec;
+static uint8_t *s_spk_pcm; // decoded PCM out
+#endif
 
 static void i2s_periph_disable_pins(void)
 {
 	gpio_num_t i2s_pins[] = { I2S_BCLK_PIN, I2S_WS_PIN };
-	gpio_config_t io_conf = {
-		.mode = GPIO_MODE_OUTPUT,
-		.pull_up_en = GPIO_PULLUP_DISABLE,
-		.pull_down_en =
-			GPIO_PULLDOWN_ENABLE
-	};
+	gpio_config_t io_conf = { .mode = GPIO_MODE_OUTPUT,
+				  .pull_up_en = GPIO_PULLUP_DISABLE,
+				  .pull_down_en = GPIO_PULLDOWN_ENABLE };
 
 	for (int i = 0; i < 2; i++) {
 		io_conf.pin_bit_mask = BIT64(i2s_pins[i]),
@@ -134,16 +137,49 @@ static void i2s_periph_init_std_duplex(void)
 
 static void audio_play_task(void *param)
 {
+#if AUDIO_LC3_SPK_ENABLE
+	uint8_t enc[2 * AUDIO_SPK_NBYTE];
+#else
 	uint8_t data[AUDIO_BUF_SIZE];
+#endif
 	int stat_total = 0, stat_conceal = 0;
 
 	ESP_LOGI(TAG, "Playback starting");
 
 	while (s_play_task) {
+#if AUDIO_LC3_SPK_ENABLE
+		jitter_frame_t kind = audio_transport_recv(enc);
+		uint32_t bytes =
+			SPK_FRAME_SAMPLES * AUDIO_NUM_CHAN * sizeof(int16_t);
+
+		// No history yet: emit silence rather than buzzing PLC.
+		if (kind == JITTER_FRAME_PREBUFFER) {
+			memset(s_spk_pcm, 0, bytes);
+		} else {
+			esp_audio_dec_in_raw_t raw = {
+				.buffer = enc,
+				.len = sizeof(enc),
+				.frame_recover =
+					kind == JITTER_FRAME_OK ?
+						ESP_AUDIO_DEC_RECOVERY_NONE :
+						ESP_AUDIO_DEC_RECOVERY_PLC,
+			};
+			esp_audio_dec_out_frame_t out = {
+				.buffer = s_spk_pcm,
+				.len = bytes,
+			};
+			esp_audio_dec_info_t info;
+			esp_lc3_dec_decode(s_dec, &raw, &out, &info);
+			bytes = out.decoded_size;
+		}
+		i2s_channel_write(s_i2s_tx, s_spk_pcm, bytes, NULL,
+				  portMAX_DELAY);
+#else
 		jitter_frame_t kind = audio_transport_recv(data);
 
 		i2s_channel_write(s_i2s_tx, data, sizeof(data), NULL,
 				  portMAX_DELAY);
+#endif
 
 		stat_total++;
 		if (kind == JITTER_FRAME_CONCEAL)
@@ -156,6 +192,7 @@ static void audio_play_task(void *param)
 	vTaskDelete(NULL);
 }
 
+#if AUDIO_MIC_ENABLE && AUDIO_LC3_MIC_ENABLE
 static void mic_enc_close(void)
 {
 	if (s_enc != NULL) {
@@ -171,11 +208,11 @@ static void mic_enc_close(void)
 static int mic_enc_open(void)
 {
 	esp_lc3_enc_config_t enc_cfg = {
-		.sample_rate = MIC_SAMPLE_RATE,
+		.sample_rate = AUDIO_SAMPLE_RATE,
 		.bits_per_sample = MIC_BITS_PER_SAMPLE,
 		.channel = 1,
-		.frame_dms = MIC_FRAME_DMS,
-		.nbyte = MIC_NBYTE,
+		.frame_dms = LC3_FRAME_DMS,
+		.nbyte = AUDIO_MIC_NBYTE,
 		.len_prefixed = false,
 	};
 
@@ -197,10 +234,52 @@ err:
 	mic_enc_close();
 	return -1;
 }
+#endif
 
+#if AUDIO_LC3_SPK_ENABLE
+static void spk_dec_close(void)
+{
+	if (s_dec != NULL) {
+		esp_lc3_dec_close(s_dec);
+		s_dec = NULL;
+	}
+	free(s_spk_pcm);
+	s_spk_pcm = NULL;
+}
+
+static int spk_dec_open(void)
+{
+	esp_lc3_dec_cfg_t dec_cfg = {
+		.sample_rate = AUDIO_SAMPLE_RATE,
+		.channel = AUDIO_NUM_CHAN,
+		.bits_per_sample = MIC_BITS_PER_SAMPLE,
+		.frame_dms = LC3_FRAME_DMS,
+		.nbyte = AUDIO_SPK_NBYTE,
+		.is_cbr = true,
+		.len_prefixed = false,
+		.enable_plc = true,
+	};
+
+	if (esp_lc3_dec_open(&dec_cfg, sizeof(dec_cfg), &s_dec) !=
+	    ESP_AUDIO_ERR_OK)
+		return -1;
+
+	s_spk_pcm =
+		malloc(SPK_FRAME_SAMPLES * AUDIO_NUM_CHAN * sizeof(int16_t));
+	if (s_spk_pcm == NULL) {
+		spk_dec_close();
+		return -1;
+	}
+
+	return 0;
+}
+#endif
+
+#if AUDIO_MIC_ENABLE
 static void audio_mic_task(void *param)
 {
 	size_t nread;
+#if AUDIO_LC3_MIC_ENABLE
 	esp_audio_enc_in_frame_t in = { .buffer = (uint8_t *)s_mic_pcm };
 	esp_audio_enc_out_frame_t out = { .buffer = s_mic_enc };
 
@@ -209,11 +288,14 @@ static void audio_mic_task(void *param)
 	int64_t enc_us = 0;
 	int frames = 0, read_err = 0;
 	int64_t window_start = esp_timer_get_time();
+#else
+	uint8_t data[AUDIO_BUF_SIZE];
+#endif
 
-	ESP_LOGI(TAG, "Mic capture starting (frame budget %d us)",
-		 MIC_FRAME_DMS * 100);
+	ESP_LOGI(TAG, "Mic capture starting");
 
 	while (s_mic_task) {
+#if AUDIO_LC3_MIC_ENABLE
 		if (i2s_channel_read(s_i2s_rx, s_mic_pcm, s_enc_in_size, &nread,
 				     portMAX_DELAY) != ESP_OK) {
 			read_err++;
@@ -241,9 +323,18 @@ static void audio_mic_task(void *param)
 			read_err = 0;
 			window_start = now;
 		}
+#else
+		if (i2s_channel_read(s_i2s_rx, data, sizeof(data), &nread,
+				     portMAX_DELAY) != ESP_OK) {
+			vTaskDelay(1);
+			continue;
+		}
+		audio_transport_send(data, nread);
+#endif
 	}
 	vTaskDelete(NULL);
 }
+#endif
 
 void i2s_periph_start(void)
 {
@@ -254,7 +345,9 @@ void i2s_periph_start(void)
 	i2s_channel_enable(s_i2s_tx);
 
 	xTaskCreate(audio_play_task, "audio_play", 4096, NULL, 3, &s_play_task);
+#if AUDIO_MIC_ENABLE
 	xTaskCreate(audio_mic_task, "audio_mic", 4096, NULL, 3, &s_mic_task);
+#endif
 }
 
 void i2s_periph_stop(void)
@@ -278,22 +371,48 @@ void i2s_periph_open(const host_conn_info_t *info)
 		.local_port = info->udp_port,
 		.remote_ip = info->ip,
 		.remote_port = info->udp_port,
-		.slot_size = AUDIO_BUF_SIZE, // inbound speaker, raw PCM
 		.num_chan = AUDIO_NUM_CHAN,
+		.jitter_enable = AUDIO_JITTER_ENABLE,
 		.jitter_cap = JITTER_CAPACITY,
-		.jitter_target = JITTER_TARGET_DEPTH,
-		.history_size = MIC_HISTORY_SIZE, // retransmit mic on NACK
+		.jitter_target = AUDIO_JITTER_DEPTH,
+#if AUDIO_LC3_SPK_ENABLE
+		.slot_size = 2 * AUDIO_SPK_NBYTE,
+		.conceal = JITTER_CONCEAL_NONE,
+#else
+		.slot_size = AUDIO_BUF_SIZE,
 		.conceal = JITTER_CONCEAL_PCM,
+#endif
+#if AUDIO_JITTER_ENABLE && AUDIO_MIC_ENABLE
+		.history_size = MIC_HISTORY_SIZE, // retransmit mic on NACK
+#else
+		.history_size = 0,
+#endif
 	};
 
-	if (mic_enc_open() != 0) {
-		ESP_LOGE(TAG, "LC3 encoder open failed");
+#if AUDIO_LC3_SPK_ENABLE
+	if (spk_dec_open() != 0) {
+		ESP_LOGE(TAG, "LC3 decoder open failed");
 		return;
 	}
+#endif
+#if AUDIO_MIC_ENABLE && AUDIO_LC3_MIC_ENABLE
+	if (mic_enc_open() != 0) {
+		ESP_LOGE(TAG, "LC3 encoder open failed");
+#if AUDIO_LC3_SPK_ENABLE
+		spk_dec_close();
+#endif
+		return;
+	}
+#endif
 
 	if (audio_transport_open(&cfg, NULL) != 0) {
 		ESP_LOGE(TAG, "Audio transport open failed");
+#if AUDIO_MIC_ENABLE && AUDIO_LC3_MIC_ENABLE
 		mic_enc_close();
+#endif
+#if AUDIO_LC3_SPK_ENABLE
+		spk_dec_close();
+#endif
 		return;
 	}
 	s_open = true;
@@ -307,7 +426,12 @@ void i2s_periph_close(void)
 	i2s_periph_stop();
 
 	audio_transport_close();
+#if AUDIO_MIC_ENABLE && AUDIO_LC3_MIC_ENABLE
 	mic_enc_close();
+#endif
+#if AUDIO_LC3_SPK_ENABLE
+	spk_dec_close();
+#endif
 	s_open = false;
 }
 
