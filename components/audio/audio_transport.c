@@ -37,31 +37,36 @@ static uint16_t s_tx_seq; // next outbound audio seqnum
 static pthread_t s_rx_thread;
 static atomic_int s_rx_run;
 
-// Latest-frame passthrough, used when the jitter buffer is disabled.
+// FIFO ring used when the jitter buffer is disabled: plays frames in arrival
+// order, absorbing UDP bursts instead of dropping them. No prebuffer, reorder
+// or PLC, so it underruns to silence on late packets.
+#define PASS_RING_DEPTH 16
 static bool s_jitter_enable;
-static uint8_t *s_pass_buf;
-static uint32_t s_pass_size;
-static uint16_t s_pass_seq;
-static bool s_pass_have;
-static bool s_pass_new;
+static uint8_t *s_pass_ring;
+static uint32_t s_pass_slot;
+static int s_pass_head;
+static int s_pass_tail;
+static int s_pass_count;
 static pthread_mutex_t s_pass_mtx = PTHREAD_MUTEX_INITIALIZER;
 
-static inline int seq_diff16(uint16_t a, uint16_t b)
+static void passthrough_put(const void *data, uint32_t len)
 {
-	return (int16_t)(a - b);
-}
+	uint8_t *slot;
 
-static void passthrough_put(uint16_t seq, const void *data, uint32_t len)
-{
+	if (len > s_pass_slot)
+		len = s_pass_slot;
+
 	pthread_mutex_lock(&s_pass_mtx);
-	if (!s_pass_have || seq_diff16(seq, s_pass_seq) > 0) {
-		if (len > s_pass_size)
-			len = s_pass_size;
-		memcpy(s_pass_buf, data, len);
-		s_pass_seq = seq;
-		s_pass_have = true;
-		s_pass_new = true;
+	if (s_pass_count == PASS_RING_DEPTH) {
+		s_pass_head = (s_pass_head + 1) % PASS_RING_DEPTH;
+		s_pass_count--;
 	}
+	slot = s_pass_ring + (size_t)s_pass_tail * s_pass_slot;
+	memcpy(slot, data, len);
+	if (len < s_pass_slot)
+		memset(slot + len, 0, s_pass_slot - len);
+	s_pass_tail = (s_pass_tail + 1) % PASS_RING_DEPTH;
+	s_pass_count++;
 	pthread_mutex_unlock(&s_pass_mtx);
 }
 
@@ -70,13 +75,15 @@ static jitter_frame_t passthrough_get(void *out)
 	jitter_frame_t r;
 
 	pthread_mutex_lock(&s_pass_mtx);
-	if (!s_pass_have) {
-		memset(out, 0, s_pass_size);
+	if (s_pass_count == 0) {
+		memset(out, 0, s_pass_slot);
 		r = JITTER_FRAME_PREBUFFER;
 	} else {
-		memcpy(out, s_pass_buf, s_pass_size);
-		r = s_pass_new ? JITTER_FRAME_OK : JITTER_FRAME_CONCEAL;
-		s_pass_new = false;
+		memcpy(out, s_pass_ring + (size_t)s_pass_head * s_pass_slot,
+		       s_pass_slot);
+		s_pass_head = (s_pass_head + 1) % PASS_RING_DEPTH;
+		s_pass_count--;
+		r = JITTER_FRAME_OK;
 	}
 	pthread_mutex_unlock(&s_pass_mtx);
 	return r;
@@ -175,8 +182,7 @@ static void *rx_thread(void *arg)
 		audio = pkt_get_audio(&pkt);
 		if (audio != NULL) {
 			if (!s_jitter_enable) {
-				passthrough_put(audio->seqnum, audio->data,
-						audio->size);
+				passthrough_put(audio->data, audio->size);
 				continue;
 			}
 			jitter_put(s_jb, audio->seqnum, audio->data,
@@ -242,11 +248,12 @@ int audio_transport_open(const audio_transport_cfg_t *cfg,
 		if (s_jb == NULL)
 			goto err;
 	} else {
-		s_pass_size = cfg->slot_size;
-		s_pass_have = false;
-		s_pass_new = false;
-		s_pass_buf = calloc(1, s_pass_size);
-		if (s_pass_buf == NULL)
+		s_pass_slot = cfg->slot_size;
+		s_pass_head = 0;
+		s_pass_tail = 0;
+		s_pass_count = 0;
+		s_pass_ring = calloc(PASS_RING_DEPTH, s_pass_slot);
+		if (s_pass_ring == NULL)
 			goto err;
 	}
 
@@ -274,8 +281,8 @@ err:
 	s_jb = NULL;
 	free(s_history);
 	s_history = NULL;
-	free(s_pass_buf);
-	s_pass_buf = NULL;
+	free(s_pass_ring);
+	s_pass_ring = NULL;
 	close(s_sock);
 	s_sock = -1;
 	return -1;
@@ -296,6 +303,6 @@ void audio_transport_close(void)
 	s_jb = NULL;
 	free(s_history);
 	s_history = NULL;
-	free(s_pass_buf);
-	s_pass_buf = NULL;
+	free(s_pass_ring);
+	s_pass_ring = NULL;
 }
